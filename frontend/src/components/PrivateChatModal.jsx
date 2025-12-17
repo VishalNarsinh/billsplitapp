@@ -13,7 +13,6 @@ const PrivateChatModal = ({ friend, onClose }) => {
     };
 
     useEffect(() => {
-        console.log("PrivateChatModal: Mounted/Updated for friend:", friend);
         if (!friend || !friend.id) {
             console.error("PrivateChatModal: Invalid friend object", friend);
             return;
@@ -40,11 +39,9 @@ const PrivateChatModal = ({ friend, onClose }) => {
             }
         };
 
-        console.log("PrivateChatModal: Connecting ChatService...");
         ChatService.connect(user.email, handleIncomingMessage);
 
         return () => {
-            console.log("PrivateChatModal: Unmounting/Cleaning up...");
             ChatService.disconnect();
         };
     }, [friend.id, user.email]);
