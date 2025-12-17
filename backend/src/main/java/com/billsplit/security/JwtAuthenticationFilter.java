@@ -13,11 +13,13 @@ import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.web.authentication.WebAuthenticationDetailsSource;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
+import lombok.extern.slf4j.Slf4j;
 
 import java.io.IOException;
 
 @Component
 @RequiredArgsConstructor
+@Slf4j
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
     private final JwtService jwtService;
@@ -37,12 +39,9 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         }
         jwt = authHeader.substring(7);
         try {
-            System.out.println("Processing JWT: " + jwt.substring(0, Math.min(10, jwt.length())) + "...");
             userEmail = jwtService.extractUsername(jwt);
-            System.out.println("Extracted UserEmail: " + userEmail);
             if (userEmail != null && SecurityContextHolder.getContext().getAuthentication() == null) {
                 UserDetails userDetails = this.userDetailsService.loadUserByUsername(userEmail);
-                System.out.println("User Loaded: " + userDetails.getUsername());
                 if (jwtService.isTokenValid(jwt, userDetails)) {
                     UsernamePasswordAuthenticationToken authToken = new UsernamePasswordAuthenticationToken(
                             userDetails,
@@ -51,17 +50,12 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                     authToken.setDetails(
                             new WebAuthenticationDetailsSource().buildDetails(request));
                     SecurityContextHolder.getContext().setAuthentication(authToken);
-                    System.out.println("Authentication Set in Context");
-                } else {
-                    System.out.println("Token Invalid");
                 }
             }
         } catch (Exception e) {
-            System.out.println("JWT Filter Exception: " + e.getMessage());
-            e.printStackTrace();
+            log.error("JWT Filter Exception: {}", e.getMessage(), e);
             SecurityContextHolder.clearContext();
         }
-        System.out.println("Proceeding on FilterChain for URI: " + request.getRequestURI());
         filterChain.doFilter(request, response);
     }
 }

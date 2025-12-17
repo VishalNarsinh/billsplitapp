@@ -12,12 +12,14 @@ import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
+import lombok.extern.slf4j.Slf4j;
 
 import java.time.Instant;
 import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class AuthService {
 
         private final UserRepository userRepository;
@@ -54,9 +56,8 @@ public class AuthService {
                                         new UsernamePasswordAuthenticationToken(request.getEmail(),
                                                         request.getPassword()));
                 } catch (Exception e) {
-                        System.out.println("FAILURE: Authentication failed for " + request.getEmail());
-                        System.out.println("FAILURE: Exception Class: " + e.getClass().getName());
-                        System.out.println("FAILURE: Exception Message: " + e.getMessage());
+                        log.error("FAILURE: Authentication failed for {}", request.getEmail());
+                        log.error("FAILURE: in authenticating {}", e.getMessage(),e);
                         throw e;
                 }
                 var user = userRepository.findByEmail(request.getEmail())
