@@ -11,6 +11,8 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.messaging.handler.annotation.MessageMapping;
 import org.springframework.messaging.handler.annotation.Payload;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
+import org.springframework.messaging.simp.user.SimpUser;
+import org.springframework.messaging.simp.user.SimpUserRegistry;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Controller;
@@ -30,6 +32,7 @@ import java.util.stream.Collectors;
 public class ChatController {
 
 	private final SimpMessagingTemplate messagingTemplate;
+	private final SimpUserRegistry simpUserRegistry;
 	private final ChatMessageRepository chatMessageRepository;
 	private final UserRepository userRepository;
 
@@ -37,11 +40,14 @@ public class ChatController {
 	public void processMessage(@Payload ChatMessageDTO chatMessageDto, Principal principal) {
 		// Principal name is the email/username from JWT
 		String senderEmail = principal.getName();
-		User sender = userRepository.findByEmail(senderEmail).orElseThrow(() -> new RuntimeException("Sender not found"));
+		User sender = userRepository.findByEmail(senderEmail)
+				.orElseThrow(() -> new RuntimeException("Sender not found"));
 
-		User recipient = userRepository.findById(chatMessageDto.getRecipientId()).orElseThrow(() -> new RuntimeException("Recipient not found"));
+		User recipient = userRepository.findById(chatMessageDto.getRecipientId())
+				.orElseThrow(() -> new RuntimeException("Recipient not found"));
 
-		ChatMessage chatMessage = ChatMessage.builder().sender(sender).recipient(recipient).content(chatMessageDto.getContent()).build();
+		ChatMessage chatMessage = ChatMessage.builder().sender(sender).recipient(recipient)
+				.content(chatMessageDto.getContent()).build();
 
 		// Save to DB
 		ChatMessage savedMsg = chatMessageRepository.save(chatMessage);
@@ -69,12 +75,14 @@ public class ChatController {
 	public ResponseEntity<List<ChatMessageDTO>> findChatMessages(@PathVariable Long friendId) {
 		Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
 		String currentUserEmail = authentication.getName();
-		User currentUser = userRepository.findByEmail(currentUserEmail).orElseThrow(() -> new RuntimeException("User not found"));
+		User currentUser = userRepository.findByEmail(currentUserEmail)
+				.orElseThrow(() -> new RuntimeException("User not found"));
 
 		User friend = userRepository.findById(friendId).orElseThrow(() -> new RuntimeException("Friend not found"));
 
-		List<ChatMessage> messages = chatMessageRepository.findBySenderAndRecipientOrRecipientAndSenderOrderByTimestampAsc(currentUser, friend,
-				currentUser, friend); // Order matters in query: (A, B) OR (A, B) is wrong. Needs (A, B) OR (B,
+		List<ChatMessage> messages = chatMessageRepository
+				.findBySenderAndRecipientOrRecipientAndSenderOrderByTimestampAsc(currentUser, friend,
+						currentUser, friend); // Order matters in query: (A, B) OR (A, B) is wrong. Needs (A, B) OR (B,
 		// A).
 		// Correct logic: (sender=Me AND recipient=Friend) OR (recipient=Me AND
 		// sender=Friend)
@@ -97,5 +105,23 @@ public class ChatController {
 				.collect(Collectors.toList());
 
 		return ResponseEntity.ok(dtos);
+	}
+
+	@GetMapping("/chat/recent-contacts")
+	public ResponseEntity<List<User>> getRecentContacts(Principal principal) {
+		String email = principal.getName();
+		User currentUser = userRepository.findByEmail(email)
+				.orElseThrow(() -> new RuntimeException("User not found"));
+
+		List<User> recentContacts = userRepository.findRecentChatPartners(currentUser.getId());
+		return ResponseEntity.ok(recentContacts);
+	}
+
+	@GetMapping("/chat/online-users")
+	public ResponseEntity<List<String>> getOnlineUsers() {
+		List<String> onlineEmails = simpUserRegistry.getUsers().stream()
+				.map(SimpUser::getName)
+				.collect(Collectors.toList());
+		return ResponseEntity.ok(onlineEmails);
 	}
 }

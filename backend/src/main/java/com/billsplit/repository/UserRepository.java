@@ -12,4 +12,7 @@ public interface UserRepository extends JpaRepository<User, Long> {
 
     // Search for users
     List<User> findByNameContainingIgnoreCaseOrEmailContainingIgnoreCase(String name, String email);
+
+    @org.springframework.data.jpa.repository.Query("SELECT DISTINCT u FROM User u WHERE u.id IN (SELECT m.sender.id FROM ChatMessage m WHERE m.recipient.id = :userId) OR u.id IN (SELECT m.recipient.id FROM ChatMessage m WHERE m.sender.id = :userId)")
+    List<User> findRecentChatPartners(Long userId);
 }
