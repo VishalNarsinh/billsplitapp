@@ -16,9 +16,13 @@ import ChatPage from './components/ChatPage';
 
 import GroupBalances from './components/GroupBalances';
 
+import { ChatProvider, useChat } from './context/ChatContext';
+
 function DashboardLayout() {
   const { user, logout } = useAuth();
+  const { totalUnreadConversations } = useChat();
   const navigate = useNavigate();
+  // ... (rest of DashboardLayout)
   const location = useLocation();
   const [isGroupModalOpen, setIsGroupModalOpen] = useState(false);
   const [isExpenseModalOpen, setIsExpenseModalOpen] = useState(false);
@@ -78,12 +82,17 @@ function DashboardLayout() {
           {/* Chat Icon */}
           <button
             onClick={() => navigate('/chat')}
-            className={`p-2 rounded-xl transition-all ${location.pathname.startsWith('/chat') ? 'bg-violet-600/20 text-violet-400' : 'hover:bg-white/5 text-slate-400 hover:text-white'}`}
+            className={`p-2 rounded-xl transition-all relative ${location.pathname.startsWith('/chat') ? 'bg-violet-600/20 text-violet-400' : 'hover:bg-white/5 text-slate-400 hover:text-white'}`}
             title="Messages"
           >
             <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
             </svg>
+            {totalUnreadConversations > 0 && (
+              <span className="absolute -top-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-[10px] font-bold text-white shadow-sm ring-2 ring-slate-900">
+                {totalUnreadConversations}
+              </span>
+            )}
           </button>
 
           <div className="flex items-center gap-3 px-4 py-2 rounded-full bg-white/5 border border-white/10 hover:bg-white/10 transition-colors cursor-pointer group">
@@ -276,7 +285,11 @@ const AuthConsumer = ({ isLogin, setIsLogin }) => {
   }
 
   if (user) {
-    return <DashboardLayout />;
+    return (
+      <ChatProvider>
+        <DashboardLayout />
+      </ChatProvider>
+    );
   }
 
   return (

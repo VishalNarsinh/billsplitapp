@@ -1,25 +1,21 @@
 import { Client } from '@stomp/stompjs';
 import SockJS from 'sockjs-client';
-import { api } from './api'; // Ensure you have this for getting token
+import { api } from './api';
 
 class ChatService {
     constructor() {
         this.client = null;
-        this.subscriptions = {};
-        this.instanceId = Math.random().toString(36).substring(7);
-        // Debug logging removed
-        window.chatService = this; // For debugging
+        this.messageCallbacks = []; // Array of listeners
     }
 
-    connect(userEmail, onMessageReceived) {
-        const token = localStorage.getItem('accessToken');
-
+    connect(userEmail, token) {
         if (this.client && this.client.active) {
-            this.client.deactivate();
+            return; // Already connected
         }
 
         this.client = new Client({
             // Endpoint: ws://localhost:8080/ws
+            // Use function to create SockJS instance
             webSocketFactory: () => new SockJS('http://localhost:8080/ws'),
             connectHeaders: {
                 Authorization: `Bearer ${token}`
@@ -32,7 +28,8 @@ class ChatService {
                 this.client.subscribe(`/user/queue/messages`, (message) => {
                     if (message.body) {
                         try {
-                            onMessageReceived(JSON.parse(message.body));
+                            const parsedMessage = JSON.parse(message.body);
+                            this.notifyListeners(parsedMessage);
                         } catch (err) {
                             console.error('Error parsing message:', err);
                         }
@@ -40,15 +37,19 @@ class ChatService {
                 });
             },
             onStompError: (frame) => {
-                console.error('broker reported error: ' + frame.headers['message']);
-                console.error('additional details: ' + frame.body);
-            },
-            onWebSocketClose: () => {
-                // Connection closed
+                console.error('Broker reported error: ' + frame.headers['message']);
+                console.error('Additional details: ' + frame.body);
             }
         });
 
         this.client.activate();
+    }
+
+    disconnect() {
+        if (this.client) {
+            this.client.deactivate();
+            this.client = null;
+        }
     }
 
     sendMessage(recipientId, content) {
@@ -62,20 +63,24 @@ class ChatService {
                 body: JSON.stringify(chatMessage)
             });
         } else {
-            console.error("Chat client not connected. State:", this.client ? "Active=" + this.client.active : "Null");
-            // Optional: generic fallback or toast
-            if (this.client) {
-                this.client.activate();
-            }
+            console.error("Chat client not connected.");
         }
     }
 
-    disconnect() {
-        if (this.client) {
-            this.client.deactivate();
-        }
+    // Observer Pattern Helpers
+    addMessageListener(callback) {
+        this.messageCallbacks.push(callback);
     }
 
+    removeMessageListener(callback) {
+        this.messageCallbacks = this.messageCallbacks.filter(cb => cb !== callback);
+    }
+
+    notifyListeners(message) {
+        this.messageCallbacks.forEach(callback => callback(message));
+    }
+
+    // API calls remain the same, but moving to ChatContext or keeping here is fine.
     async getHistory(friendId) {
         const response = await api.get(`/messages/${friendId}`);
         return response.data;

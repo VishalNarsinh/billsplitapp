@@ -1,9 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
 import ChatService from '../services/chatService';
 import { useAuth } from '../context/AuthContext';
+import { useChat } from '../context/ChatContext';
 
 const PrivateChatModal = ({ friend, onClose }) => {
     const { user } = useAuth();
+    const { onlineUsers, setActiveChatId, markAsRead } = useChat();
     const [messages, setMessages] = useState([]);
     const [newMessage, setNewMessage] = useState('');
     const messagesEndRef = useRef(null);
@@ -13,10 +15,11 @@ const PrivateChatModal = ({ friend, onClose }) => {
     };
 
     useEffect(() => {
-        if (!friend || !friend.id) {
-            console.error("PrivateChatModal: Invalid friend object", friend);
-            return;
-        }
+        if (!friend || !friend.id) return;
+
+        // Set as active chat to prevent unread count increment
+        setActiveChatId(friend.id);
+        markAsRead(friend.id);
 
         // Load history
         const loadHistory = async () => {
@@ -31,20 +34,22 @@ const PrivateChatModal = ({ friend, onClose }) => {
         loadHistory();
 
         const handleIncomingMessage = (msg) => {
-            // Check if message belongs to this conversation
-            // Either from Friend -> Me OR Me -> Friend (if we receive our own echo)
             if (msg.senderId == friend.id || msg.recipientId == friend.id) {
                 setMessages(prev => [...prev, msg]);
                 scrollToBottom();
+                if (msg.senderId == friend.id) {
+                    markAsRead(friend.id);
+                }
             }
         };
 
-        ChatService.connect(user.email, handleIncomingMessage);
+        ChatService.addMessageListener(handleIncomingMessage);
 
         return () => {
-            ChatService.disconnect();
+            ChatService.removeMessageListener(handleIncomingMessage);
+            setActiveChatId(null);
         };
-    }, [friend.id, user.email]);
+    }, [friend?.id, user.email, setActiveChatId, markAsRead]);
 
     useEffect(() => {
         scrollToBottom();
@@ -55,20 +60,10 @@ const PrivateChatModal = ({ friend, onClose }) => {
         if (!newMessage.trim()) return;
 
         ChatService.sendMessage(friend.id, newMessage);
-
-        // Optimistic update - REMOVED
-        // We rely on the server echo.
-        // const optimisticMsg = { ... };
-        // setMessages(prev => [...prev, optimisticMsg]);
-        // scrollToBottom();
-
         setNewMessage('');
-        // Controller sends back to queue, so we might get a duplicate if we don't dedupe.
-        // But better to see it twice (or handle generic dedupe) than not at all.
-        // For now, let's rely on the duplicate being rare or acceptable for MVP.
-        // Actually, preventing duplicate is easy if we check ID, but ID comes from backend.
-        // Let's stick to optimistic for responsiveness.
     };
+
+    const isOnline = friend && onlineUsers.some(email => email === friend.email);
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
@@ -81,9 +76,9 @@ const PrivateChatModal = ({ friend, onClose }) => {
                         </div>
                         <div>
                             <h3 className="font-bold text-white text-lg">{friend.name}</h3>
-                            <p className="text-xs text-emerald-400 flex items-center gap-1">
-                                <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
-                                Online
+                            <p className={`text-xs flex items-center gap-1 ${isOnline ? 'text-emerald-400' : 'text-slate-500'}`}>
+                                <span className={`w-2 h-2 rounded-full ${isOnline ? 'bg-emerald-400' : 'bg-slate-500'}`}></span>
+                                {isOnline ? 'Online' : 'Offline'}
                             </p>
                         </div>
                     </div>
