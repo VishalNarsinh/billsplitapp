@@ -48,6 +48,11 @@ export const ChatProvider = ({ children }) => {
             return;
         }
 
+        // Only increment unread for actual CHAT messages
+        if (msg.type && msg.type !== 'CHAT') {
+            return;
+        }
+
         setUnreadCounts(prev => ({
             ...prev,
             [senderId]: (prev[senderId] || 0) + 1

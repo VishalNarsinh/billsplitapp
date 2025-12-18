@@ -55,6 +55,25 @@ const ChatPage = () => {
         messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
     };
 
+    const [isTyping, setIsTyping] = useState(false);
+    const typingTimeoutRef = useRef(null);
+
+    const handleInputChange = (e) => {
+        setNewMessage(e.target.value);
+
+        if (!currentFriend) return;
+
+        // Send typing indicator
+        ChatService.sendTyping(currentFriend.id);
+
+        // Clear existing timeout
+        if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+
+        // Set new timeout to stop typing after 2 seconds of inactivity
+        // Note: In a real app we might want to send a "STOP_TYPING" event, 
+        // but for now the receiver can just auto-hide it after a timeout too.
+    };
+
     useEffect(() => {
         if (!currentFriend || !currentFriend.id) return;
 
@@ -64,6 +83,12 @@ const ChatPage = () => {
                 const history = await ChatService.getHistory(currentFriend.id);
                 setMessages(history);
                 scrollToBottom();
+
+                // Mark loaded messages as read if any are unread
+                // Just calling markAsRead in context connects the badge, but backend needs to know too
+                // We do this via the new chat.read endpoint if there are unread ones.
+                // Or simplified: just send a read receipt for the friend when we open.
+                ChatService.sendReadReceipt(currentFriend.id);
             } catch (err) {
                 console.error("Failed to load chat history", err);
             }
@@ -73,11 +98,45 @@ const ChatPage = () => {
         // Subscribe to incoming messages to update UI in real-time
         const handleIncomingMessage = (msg) => {
             if (msg.senderId == currentFriend.id || msg.recipientId == currentFriend.id) {
+
+                if (msg.type === 'TYPING') {
+                    if (msg.senderId === currentFriend.id) {
+                        // Check if this typing event is stale (older than the last message received)
+                        const lastMsgFromFriend = messages.findLast(m => m.senderId === currentFriend.id);
+                        if (lastMsgFromFriend && msg.timestamp && new Date(msg.timestamp) < new Date(lastMsgFromFriend.timestamp)) {
+                            return; // Ignore stale typing event
+                        }
+
+                        setIsTyping(true);
+                        // Auto-hide after 3 seconds if no new typing event
+                        if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+                        typingTimeoutRef.current = setTimeout(() => setIsTyping(false), 3000);
+                    }
+                    return;
+                }
+
+                if (msg.type === 'READ_RECEIPT') {
+                    if (msg.senderId === currentFriend.id) {
+                        // The friend read OUR messages. 
+                        // Update our local messages to be isRead=true
+                        setMessages(prev => prev.map(m => m.senderId === user.id ? { ...m, isRead: true } : m));
+                    }
+                    return;
+                }
+
+                // Normal CHAT message
                 setMessages(prev => [...prev, msg]);
+                setIsTyping(false);
+                if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+
+                // No more blocking needed as we check timestamps now.
+
                 scrollToBottom();
+
                 // Also mark as read immediately if we are looking at it
                 if (msg.senderId == currentFriend.id) {
                     markAsRead(currentFriend.id);
+                    ChatService.sendReadReceipt(currentFriend.id);
                 }
             }
         };
@@ -87,11 +146,12 @@ const ChatPage = () => {
         return () => {
             ChatService.removeMessageListener(handleIncomingMessage);
         };
-    }, [currentFriend?.id, markAsRead]);
+    }, [currentFriend?.id, markAsRead, user.id]);
 
     useEffect(() => {
         scrollToBottom();
-    }, [messages]);
+    }, [messages, isTyping]);
+
 
     const handleSend = (e) => {
         e.preventDefault();
@@ -102,6 +162,13 @@ const ChatPage = () => {
     };
 
     const isOnline = currentFriend && onlineUsers.some(email => email === currentFriend.email);
+
+    // helper to find last read message index
+    const lastMessage = messages[messages.length - 1];
+    const isLastMessageFromMe = lastMessage && lastMessage.senderId === user.id;
+    const lastReadMessageIndex = isLastMessageFromMe
+        ? messages.findLastIndex(m => m.senderId === user.id && m.isRead)
+        : -1;
 
     return (
         <div className="flex h-[calc(100vh-80px)] bg-slate-900 border-t border-white/5">
@@ -183,8 +250,9 @@ const ChatPage = () => {
                         <div className="flex-1 overflow-y-auto p-8 space-y-4">
                             {messages.map((msg, idx) => {
                                 const isMe = msg.senderId === user.id;
+                                const isLastRead = idx === lastReadMessageIndex;
                                 return (
-                                    <div key={idx} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
+                                    <div key={idx} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'}`}>
                                         <div className={`max-w-[60%] px-6 py-3 rounded-2xl ${isMe
                                             ? 'bg-violet-600 text-white rounded-br-sm shadow-lg shadow-violet-900/20'
                                             : 'bg-slate-800 text-slate-200 rounded-bl-sm border border-white/5'
@@ -194,9 +262,23 @@ const ChatPage = () => {
                                                 {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                                             </p>
                                         </div>
+                                        {isMe && isLastRead && (
+                                            <span className="text-[10px] text-slate-500 mt-1 mr-1">Seen</span>
+                                        )}
                                     </div>
                                 );
                             })}
+
+                            {isTyping && (
+                                <div className="flex justify-start">
+                                    <div className="bg-slate-800 text-slate-400 px-4 py-3 rounded-2xl rounded-bl-sm border border-white/5 text-xs flex items-center gap-1.5 shadow-lg">
+                                        <div className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-pulse"></div>
+                                        <div className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-pulse delay-150"></div>
+                                        <div className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-pulse delay-300"></div>
+                                    </div>
+                                </div>
+                            )}
+
                             <div ref={messagesEndRef} />
                         </div>
 
@@ -206,7 +288,7 @@ const ChatPage = () => {
                                 <input
                                     type="text"
                                     value={newMessage}
-                                    onChange={(e) => setNewMessage(e.target.value)}
+                                    onChange={handleInputChange}
                                     placeholder="Type a message..."
                                     className="flex-1 bg-slate-950 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-slate-500 focus:outline-none focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/50 transition-all font-sans"
                                 />

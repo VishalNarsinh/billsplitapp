@@ -4,6 +4,7 @@ import lombok.Data;
 import lombok.Builder;
 import lombok.NoArgsConstructor;
 import lombok.AllArgsConstructor;
+import com.billsplit.model.MessageType;
 import java.time.LocalDateTime;
 
 @Data
@@ -17,4 +18,6 @@ public class ChatMessageDTO {
     private Long recipientId;
     private String content;
     private LocalDateTime timestamp;
+    private boolean isRead;
+    private MessageType type;
 }

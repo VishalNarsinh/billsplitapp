@@ -31,6 +31,9 @@ public class ChatMessage {
 
     private LocalDateTime timestamp;
 
+    @Column(columnDefinition = "boolean default false")
+    private boolean isRead;
+
     @PrePersist
     protected void onCreate() {
         timestamp = LocalDateTime.now();

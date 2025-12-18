@@ -2,6 +2,7 @@ package com.billsplit.controller;
 
 import com.billsplit.dto.ChatMessageDTO;
 import com.billsplit.model.ChatMessage;
+import com.billsplit.model.MessageType;
 import com.billsplit.model.User;
 import com.billsplit.repository.ChatMessageRepository;
 import com.billsplit.repository.UserRepository;
@@ -38,7 +39,6 @@ public class ChatController {
 
 	@MessageMapping("/chat.private")
 	public void processMessage(@Payload ChatMessageDTO chatMessageDto, Principal principal) {
-		// Principal name is the email/username from JWT
 		String senderEmail = principal.getName();
 		User sender = userRepository.findByEmail(senderEmail)
 				.orElseThrow(() -> new RuntimeException("Sender not found"));
@@ -46,10 +46,24 @@ public class ChatController {
 		User recipient = userRepository.findById(chatMessageDto.getRecipientId())
 				.orElseThrow(() -> new RuntimeException("Recipient not found"));
 
-		ChatMessage chatMessage = ChatMessage.builder().sender(sender).recipient(recipient)
-				.content(chatMessageDto.getContent()).build();
+		// 1. Handle Typing Events (Ephemeral, don't save to DB)
+		if (chatMessageDto.getType() == MessageType.TYPING) {
+			ChatMessageDTO typingDto = ChatMessageDTO.builder()
+					.senderId(sender.getId())
+					.recipientId(recipient.getId())
+					.type(MessageType.TYPING)
+					.timestamp(java.time.LocalDateTime.now())
+					.build();
+			messagingTemplate.convertAndSendToUser(recipient.getEmail(), "/queue/messages", typingDto);
+			return;
+		}
+		ChatMessage chatMessage = ChatMessage.builder()
+				.sender(sender)
+				.recipient(recipient)
+				.content(chatMessageDto.getContent())
+				.isRead(false) // Default
+				.build();
 
-		// Save to DB
 		ChatMessage savedMsg = chatMessageRepository.save(chatMessage);
 
 		ChatMessageDTO responseDto = ChatMessageDTO.builder()
@@ -59,16 +73,46 @@ public class ChatController {
 				.recipientId(recipient.getId())
 				.content(savedMsg.getContent())
 				.timestamp(savedMsg.getTimestamp())
+				.isRead(false)
+				.type(MessageType.CHAT)
 				.build();
 
-		// Send to Recipient's User Queue
-		String recipientEmail = recipient.getEmail().toLowerCase().trim();
-
-		messagingTemplate.convertAndSendToUser(recipientEmail, "/queue/messages", responseDto);
-
-		// Also send back to Sender so they see it confirmed (optional, can just append
-		// locally)
+		messagingTemplate.convertAndSendToUser(recipient.getEmail(), "/queue/messages", responseDto);
 		messagingTemplate.convertAndSendToUser(sender.getEmail(), "/queue/messages", responseDto);
+	}
+
+	@MessageMapping("/chat.read")
+	public void markMessagesAsRead(@Payload ChatMessageDTO readDto, Principal principal) {
+		// The user sending this request (principal) has read messages FROM 'senderId'
+		// (in payload)
+		String readerEmail = principal.getName();
+		User reader = userRepository.findByEmail(readerEmail)
+				.orElseThrow(() -> new RuntimeException("Reader not found"));
+
+		Long originalSenderId = readDto.getRecipientId(); // Use recipientId field to carry the ID of the person whose
+															// messages we read
+		// Logic: Update all messages where sender = originalSenderId AND recipient =
+		// reader AND isRead = false
+
+		User originalSender = userRepository.findById(originalSenderId)
+				.orElseThrow(() -> new RuntimeException("Original Sender not found"));
+
+		List<ChatMessage> unreadMessages = chatMessageRepository.findBySenderAndRecipientAndIsReadFalse(originalSender,
+				reader);
+
+		if (!unreadMessages.isEmpty()) {
+			unreadMessages.forEach(msg -> msg.setRead(true));
+			chatMessageRepository.saveAll(unreadMessages);
+
+			// Notify the Original Sender that their messages were read
+			ChatMessageDTO receiptDto = ChatMessageDTO.builder()
+					.senderId(reader.getId()) // Who read the message
+					.recipientId(originalSender.getId())
+					.type(MessageType.READ_RECEIPT)
+					.build();
+
+			messagingTemplate.convertAndSendToUser(originalSender.getEmail(), "/queue/messages", receiptDto);
+		}
 	}
 
 	@GetMapping("/messages/{friendId}")
@@ -82,16 +126,7 @@ public class ChatController {
 
 		List<ChatMessage> messages = chatMessageRepository
 				.findBySenderAndRecipientOrRecipientAndSenderOrderByTimestampAsc(currentUser, friend,
-						currentUser, friend); // Order matters in query: (A, B) OR (A, B) is wrong. Needs (A, B) OR (B,
-		// A).
-		// Correct logic: (sender=Me AND recipient=Friend) OR (recipient=Me AND
-		// sender=Friend)
-
-		// Fixed repository call logic in standard JPA style above is actually tricky
-		// with positional params inferred.
-		// Let's rely on the method naming convention:
-		// findBySenderAndRecipientOrRecipientAndSenderOrderByTimestampAsc(s1,r1,r2,s2)
-		// matches: (sender=s1 AND recipient=r1) OR (recipient=r2 AND sender=s2)
+						currentUser, friend);
 
 		List<ChatMessageDTO> dtos = messages.stream()
 				.map(msg -> ChatMessageDTO.builder()
@@ -101,11 +136,14 @@ public class ChatController {
 						.recipientId(msg.getRecipient().getId())
 						.content(msg.getContent())
 						.timestamp(msg.getTimestamp())
+						.isRead(msg.isRead())
+						.type(MessageType.CHAT)
 						.build())
 				.collect(Collectors.toList());
 
 		return ResponseEntity.ok(dtos);
 	}
+	// ... rest of controller
 
 	@GetMapping("/chat/recent-contacts")
 	public ResponseEntity<List<User>> getRecentContacts(Principal principal) {

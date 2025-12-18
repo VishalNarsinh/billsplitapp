@@ -56,7 +56,8 @@ class ChatService {
         if (this.client && this.client.connected) {
             const chatMessage = {
                 recipientId: recipientId,
-                content: content
+                content: content,
+                type: 'CHAT'
             };
             this.client.publish({
                 destination: "/app/chat.private",
@@ -64,6 +65,32 @@ class ChatService {
             });
         } else {
             console.error("Chat client not connected.");
+        }
+    }
+
+    sendTyping(recipientId) {
+        if (this.client && this.client.connected) {
+            const chatMessage = {
+                recipientId: recipientId,
+                type: 'TYPING'
+            };
+            this.client.publish({
+                destination: "/app/chat.private",
+                body: JSON.stringify(chatMessage)
+            });
+        }
+    }
+
+    sendReadReceipt(recipientId) {
+        if (this.client && this.client.connected) {
+            const chatMessage = {
+                recipientId: recipientId,
+                type: 'READ_RECEIPT'
+            };
+            this.client.publish({
+                destination: "/app/chat.read", // Separate endpoint in Controller
+                body: JSON.stringify(chatMessage)
+            });
         }
     }
 
